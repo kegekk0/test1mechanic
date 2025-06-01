@@ -1,68 +1,43 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using Microsoft.AspNetCore.Mvc;
 using test1mechanic.Models;
-using test1mechanic.Repositories;
+using VisitService = test1mechanic.Services.VisitService;
 
 namespace test1mechanic.Controllers;
 
-using Microsoft.AspNetCore.Mvc;
-
-[Route("api/[controller]")]
 [ApiController]
+[Route("api/[controller]")]
 public class VisitsController : ControllerBase
 {
-    private readonly IVisitRepository _visitRepository;
+    private readonly VisitService _visitService;
 
-    public VisitsController(IVisitRepository visitRepository)
+    public VisitsController(VisitService visitService)
     {
-        _visitRepository = visitRepository;
+        _visitService = visitService;
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetVisit(int id)
     {
-        var visitDetails = await _visitRepository.GetVisitDetailsAsync(id);
-        
-        if (visitDetails == null)
-            return NotFound();
-
-        return Ok(visitDetails);
+        var visit = await _visitService.GetVisitDetailsAsync(id);
+        return visit != null ? Ok(visit) : NotFound();
     }
 
     [HttpPost]
-    public async Task<IActionResult> AddVisit([FromBody] VisitRequest visitRequest)
+    public async Task<IActionResult> AddVisit([FromBody] VisitRequest request)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
-        if (await _visitRepository.VisitExistsAsync(visitRequest.VisitId))
-            return Conflict("A visit with this ID already exists");
-
-        if (!await _visitRepository.ClientExistsAsync(visitRequest.ClientId))
-            return NotFound("Client not found");
-
-        var mechanicId = await _visitRepository.GetMechanicIdByLicenceAsync(visitRequest.MechanicLicenceNumber);
-        if (mechanicId == null)
-            return NotFound("Mechanic not found");
-
-        foreach (var service in visitRequest.Services)
-        {
-            var serviceId = await _visitRepository.GetServiceIdByNameAsync(service.ServiceName);
-            if (serviceId == null)
-                return NotFound("Service not found");
-        }
-
         try
         {
-            var result = await _visitRepository.AddVisitAsync(visitRequest);
-            if (result)
-                return CreatedAtAction(nameof(GetVisit), new { id = visitRequest.VisitId }, null);
-            
-            return BadRequest("Failed to add visit");
+            await _visitService.AddVisitAsync(request);
+            return CreatedAtAction(nameof(GetVisit), new { id = request.VisitId }, null);
         }
         catch (Exception ex)
         {
-            return StatusCode(500, ex.Message);
+            return ex switch
+            {
+                InvalidOperationException => Conflict(ex.Message),
+                KeyNotFoundException => NotFound(ex.Message),
+                _ => StatusCode(500, ex.Message)
+            };
         }
     }
 }

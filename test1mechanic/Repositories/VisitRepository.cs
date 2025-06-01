@@ -2,12 +2,10 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
 using test1mechanic.Models;
 
 namespace test1mechanic.Repositories;
-
-using System.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 
 public class VisitRepository : IVisitRepository
 {
@@ -15,12 +13,8 @@ public class VisitRepository : IVisitRepository
 
     public VisitRepository(IConfiguration configuration)
     {
-        _connectionString = configuration.GetConnectionString("WorkshopDb");
-
-        if (string.IsNullOrEmpty(_connectionString))
-        {
-            throw new ArgumentNullException("Connection string not found");
-        }
+        _connectionString = configuration.GetConnectionString("WorkshopDb") 
+            ?? throw new ArgumentNullException("Connection string 'WorkshopDb' not found.");
     }
 
     public async Task<VisitDetails> GetVisitDetailsAsync(int visitId)
@@ -28,10 +22,10 @@ public class VisitRepository : IVisitRepository
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var visitQuery = @"
+        const string visitQuery = @"
             SELECT v.date, 
                    c.client_id, c.first_name, c.last_name, c.date_of_birth,
-                   m.mechanic_id, m.licence_number
+                m.mechanic_id, m.licence_number
             FROM Visit v
             JOIN Client c ON v.client_id = c.client_id
             JOIN Mechanic m ON v.mechanic_id = m.mechanic_id
@@ -41,9 +35,8 @@ public class VisitRepository : IVisitRepository
         visitCommand.Parameters.AddWithValue("@VisitId", visitId);
 
         using var visitReader = await visitCommand.ExecuteReaderAsync();
-        
-        if (!visitReader.HasRows)
-            return null;
+    
+        if (!visitReader.HasRows) return null;
 
         await visitReader.ReadAsync();
 
@@ -62,12 +55,12 @@ public class VisitRepository : IVisitRepository
                 MechanicId = visitReader.GetInt32(5),
                 LicenceNumber = visitReader.GetString(6)
             },
-            VisitServices = new List<VisitService>()
+            Services = new List<ServiceDetail>()
         };
 
         await visitReader.CloseAsync();
 
-        var servicesQuery = @"
+        const string servicesQuery = @"
             SELECT s.name, vs.service_fee
             FROM Visit_Service vs
             JOIN Service s ON vs.service_id = s.service_id
@@ -77,10 +70,10 @@ public class VisitRepository : IVisitRepository
         servicesCommand.Parameters.AddWithValue("@VisitId", visitId);
 
         using var servicesReader = await servicesCommand.ExecuteReaderAsync();
-        
+    
         while (await servicesReader.ReadAsync())
         {
-            visitDetails.VisitServices.Add(new VisitService
+            visitDetails.Services.Add(new ServiceDetail
             {
                 Name = servicesReader.GetString(0),
                 ServiceFee = servicesReader.GetDecimal(1)
@@ -90,43 +83,41 @@ public class VisitRepository : IVisitRepository
         return visitDetails;
     }
 
-    public async Task<bool> AddVisitAsync(VisitRequest visitRequest)
+    public async Task<bool> AddVisitAsync(Visit visit, List<VisitServiceRequest> services)
     {
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
-
         using var transaction = connection.BeginTransaction();
 
         try
         {
-            var visitQuery = @"
-                INSERT INTO Visit (visit_id, client_id, mechanic_id, date)
-                VALUES (@VisitId, @ClientId, @MechanicId, @Date)";
+            // Insert Visit record
+            const string visitQuery = @"
+            INSERT INTO Visit (visit_id, client_id, mechanic_id, date)
+            VALUES (@VisitId, @ClientId, @MechanicId, @Date)";
 
-            using var visitCommand = new SqlCommand(visitQuery, connection, transaction);
-            visitCommand.Parameters.AddWithValue("@VisitId", visitRequest.VisitId);
-            visitCommand.Parameters.AddWithValue("@ClientId", visitRequest.ClientId);
-            visitCommand.Parameters.AddWithValue("@MechanicId", await GetMechanicIdByLicenceAsync(visitRequest.MechanicLicenceNumber));
-            visitCommand.Parameters.AddWithValue("@Date", DateTime.Now); // Using current date for simplicity
-
-            await visitCommand.ExecuteNonQueryAsync();
-
-            foreach (var service in visitRequest.Services)
+            using (var visitCommand = new SqlCommand(visitQuery, connection, transaction))
             {
-                var serviceId = await GetServiceIdByNameAsync(service.ServiceName);
-                if (serviceId == null)
-                    throw new Exception($"Service '{service.ServiceName}' not found");
+                visitCommand.Parameters.AddWithValue("@VisitId", visit.VisitId);
+                visitCommand.Parameters.AddWithValue("@ClientId", visit.ClientId);
+                visitCommand.Parameters.AddWithValue("@MechanicId", visit.MechanicId);
+                visitCommand.Parameters.AddWithValue("@Date", visit.Date);
+                await visitCommand.ExecuteNonQueryAsync();
+            }
 
-                var serviceQuery = @"
-                    INSERT INTO Visit_Service (visit_id, service_id, service_fee)
-                    VALUES (@VisitId, @ServiceId, @ServiceFee)";
+            foreach (var service in services)
+            {
+                const string serviceQuery = @"
+                INSERT INTO Visit_Service (visit_id, service_id, service_fee)
+                VALUES (@VisitId, @ServiceId, @ServiceFee)";
 
-                using var serviceCommand = new SqlCommand(serviceQuery, connection, transaction);
-                serviceCommand.Parameters.AddWithValue("@VisitId", visitRequest.VisitId);
-                serviceCommand.Parameters.AddWithValue("@ServiceId", serviceId);
-                serviceCommand.Parameters.AddWithValue("@ServiceFee", service.ServiceFee);
-
-                await serviceCommand.ExecuteNonQueryAsync();
+                using (var serviceCommand = new SqlCommand(serviceQuery, connection, transaction))
+                {
+                    serviceCommand.Parameters.AddWithValue("@VisitId", visit.VisitId);
+                    serviceCommand.Parameters.AddWithValue("@ServiceId", service.ServiceId);
+                    serviceCommand.Parameters.AddWithValue("@ServiceFee", service.ServiceFee);
+                    await serviceCommand.ExecuteNonQueryAsync();
+                }
             }
 
             await transaction.CommitAsync();
@@ -144,7 +135,7 @@ public class VisitRepository : IVisitRepository
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var query = "SELECT 1 FROM Visit WHERE visit_id = @VisitId";
+        const string query = "SELECT 1 FROM Visit WHERE visit_id = @VisitId";
         using var command = new SqlCommand(query, connection);
         command.Parameters.AddWithValue("@VisitId", visitId);
 
@@ -156,7 +147,7 @@ public class VisitRepository : IVisitRepository
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var query = "SELECT 1 FROM Client WHERE client_id = @ClientId";
+        const string query = "SELECT 1 FROM Client WHERE client_id = @ClientId";
         using var command = new SqlCommand(query, connection);
         command.Parameters.AddWithValue("@ClientId", clientId);
 
@@ -168,12 +159,11 @@ public class VisitRepository : IVisitRepository
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var query = "SELECT mechanic_id FROM Mechanic WHERE licence_number = @LicenceNumber";
+        const string query = "SELECT mechanic_id FROM Mechanic WHERE licence_number = @LicenceNumber";
         using var command = new SqlCommand(query, connection);
         command.Parameters.AddWithValue("@LicenceNumber", licenceNumber);
 
-        var result = await command.ExecuteScalarAsync();
-        return result != null ? (int)result : null;
+        return (int?)await command.ExecuteScalarAsync();
     }
 
     public async Task<int?> GetServiceIdByNameAsync(string serviceName)
@@ -181,11 +171,10 @@ public class VisitRepository : IVisitRepository
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var query = "SELECT service_id FROM Service WHERE name = @ServiceName";
+        const string query = "SELECT service_id FROM Service WHERE name = @ServiceName";
         using var command = new SqlCommand(query, connection);
         command.Parameters.AddWithValue("@ServiceName", serviceName);
 
-        var result = await command.ExecuteScalarAsync();
-        return result != null ? (int)result : null;
+        return (int?)await command.ExecuteScalarAsync();
     }
 }

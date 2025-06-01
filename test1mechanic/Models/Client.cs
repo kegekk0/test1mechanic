@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace test1mechanic.Models;
+﻿namespace test1mechanic.Models;
 
 public class Client
 {

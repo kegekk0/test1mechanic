@@ -66,3 +66,4 @@ C:\Users\pieku\RiderProjects\test1mechanic\test1mechanic\obj\Debug\net9.0\refint
 C:\Users\pieku\RiderProjects\test1mechanic\test1mechanic\obj\Debug\net9.0\test1mechanic.pdb
 C:\Users\pieku\RiderProjects\test1mechanic\test1mechanic\obj\Debug\net9.0\test1mechanic.genruntimeconfig.cache
 C:\Users\pieku\RiderProjects\test1mechanic\test1mechanic\obj\Debug\net9.0\ref\test1mechanic.dll
+C:\Users\pieku\RiderProjects\test1mechanic\test1mechanic\obj\Debug\net9.0\test1mechanic.sourcelink.json
